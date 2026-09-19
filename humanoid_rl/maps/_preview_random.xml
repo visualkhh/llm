@@ -1,0 +1,11 @@
+<mujoco model="map">
+  <compiler angle="radian"/>
+
+  <worldbody>
+    <geom name="ground" size="30 30 0.1" type="plane" group="1" friction="1.2" rgba="0.55 0.6 0.55 1"/>
+    <geom name="obstacle_0" size="0.267988 0.267988 0.659621" pos="5.82396 0.976792 0.659621" type="box" group="1" rgba="0.75 0.25 0.2 1"/>
+    <geom name="obstacle_1" size="0.275745 0.275745 0.593334" pos="3.39197 0.544434 0.593334" type="box" group="1" rgba="0.75 0.25 0.2 1"/>
+    <geom name="obstacle_2" size="0.226558 0.226558 0.752956" pos="2.09959 1.63859 0.752956" type="box" group="1" rgba="0.75 0.25 0.2 1"/>
+    <geom name="obstacle_3" size="0.295737 0.295737 0.785858" pos="5.62617 -2.45517 0.785858" type="box" group="1" rgba="0.75 0.25 0.2 1"/>
+  </worldbody>
+</mujoco>

@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.idea/
+.venv/
+
+chat/checkpoints/
+chat/data/input.txt
+chat/data/*.bin
+chat/data/*.pkl
+
+humanoid_rl/checkpoints/

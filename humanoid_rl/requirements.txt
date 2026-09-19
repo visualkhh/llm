@@ -1,0 +1,6 @@
+mujoco
+gymnasium
+tensorflow
+numpy
+opencv-python
+psutil
