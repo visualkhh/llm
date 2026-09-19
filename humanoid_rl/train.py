@@ -345,6 +345,15 @@ def main():
     if args.pipeline:
         print("[pipeline] 다음 롤아웃 수집과 지금 데이터 학습을 동시에 진행합니다.")
 
+    # Ctrl+C(KeyboardInterrupt)는 항상 "메인 스레드"에만 전달된다. --pipeline
+    # 모드에서 그 순간 백그라운드 스레드(다음 롤아웃 수집 중)가 아직 살아있을
+    # 수 있는데, 그 상태로 바로 vec_env.close()를 부르면 백그라운드 스레드가
+    # 마침 워커에게 결과를 기다리던 파이프가 갑자기 닫혀버려 EOFError가 난다.
+    # 이를 막기 위해 지금 떠 있는 스레드를 추적해뒀다가, 종료 전에 반드시
+    # 먼저 끝나기를 기다린다(join) — 워커는 아직 살아있으니 곧 정상적으로
+    # 끝난다.
+    bg_thread = None
+
     try:
         if args.pipeline:
             # --- 파이프라인 모드 ---
@@ -362,12 +371,13 @@ def main():
                 def bg_collect(o=obs_after):
                     result_box["rollout"] = do_collect(o)
 
-                thread = threading.Thread(target=bg_collect)
-                thread.start()
+                bg_thread = threading.Thread(target=bg_collect)
+                bg_thread.start()
 
                 process_rollout(it, rollout)   # 메인 스레드: 지금 데이터로 학습
 
-                thread.join()                  # 백그라운드 롤아웃이 끝날 때까지 대기
+                bg_thread.join()                # 백그라운드 롤아웃이 끝날 때까지 대기
+                bg_thread = None                 # 안전하게 끝났으니 추적할 필요 없음
                 agent.sync_infer()              # 방금 학습한 최신 가중치를 다음 롤아웃용으로 반영
                 rollout = result_box["rollout"]
                 obs = rollout[-1]
@@ -383,6 +393,8 @@ def main():
     else:
         print("training done.")
     finally:
+        if bg_thread is not None and bg_thread.is_alive():
+            bg_thread.join()
         if live_viewer_box[0] is not None:
             live_viewer_box[0].close()
         vec_env.close()
