@@ -42,7 +42,9 @@ def main():
     parser.add_argument("--ckpt_name", type=str, default="ppo_biped")
     parser.add_argument("--goal", type=float, nargs=2, default=None,
                          help="목표 지점을 직접 지정 (예: --goal 5.0 -1.0). 생략하면 무작위.")
-    parser.add_argument("--episodes", type=int, default=5)
+    parser.add_argument("--episodes", type=int, default=5,
+                         help="몇 번 시도(에피소드)해볼지. 기본값 5. 더 많이 보고 싶으면 "
+                              "예: --episodes 20 처럼 늘리면 된다.")
     parser.add_argument("--map_path", type=str, default=None,
                          help="사용할 맵(.xml) 파일 경로. 생략하면 maps/map_default.xml 사용")
     parser.add_argument("--randomize_map", action="store_true",
@@ -148,8 +150,10 @@ def main():
             )
             return
         raise
-
-    env.close()
+    except KeyboardInterrupt:
+        print("\nCtrl+C 감지 — 여기까지 보고 멈춥니다.")
+    finally:
+        env.close()
 
 
 if __name__ == "__main__":

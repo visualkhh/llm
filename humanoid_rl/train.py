@@ -16,6 +16,7 @@
 import argparse
 import json
 import os
+import signal
 import threading
 import time
 
@@ -94,9 +95,30 @@ def collect_rollout(
     return buf_obs, buf_actions, buf_log_probs, buf_values, buf_rewards, buf_dones, last_values, obs
 
 
+# --multiprocess일 때 워커 하나가 코어 하나를 차지하므로, 워커 수가 물리
+# 코어 수를 넘어가면 메인 프로세스(TF 추론/학습)와 워커들이 같은 코어를
+# 놓고 경쟁하면서 컨텍스트 스위칭 오버헤드가 커져 오히려 느려진다. 실제로
+# 이 문제를 조사하며 --multiprocess --pipeline으로 n_envs를 8/9/10/12/16로
+# 바꿔가며 25초씩 실측했더니 (10코어 머신 기준):
+#   n_envs=8  -> 3604 steps/s
+#   n_envs=9  -> 3871 steps/s (최고 — 코어 수-1, 메인 프로세스에 코어 1개 남김)
+#   n_envs=10 -> 2867 steps/s (코어 수만큼 채우면 오히려 하락)
+#   n_envs=12 -> 3195 steps/s
+#   n_envs=16 -> 2621 steps/s (많이 넣을수록 더 느려짐)
+# "CPU 사용률 숫자를 100%로 만드는 것"과 "초당 처리량을 최대화하는 것"은
+# 다르다 — 코어 수보다 워커를 더 넣으면 CPU 사용률(%)은 더 높아 보여도
+# 실제 처리 속도는 떨어진다. 그래서 기본값은 하드코딩된 숫자 대신 "이
+# 컴퓨터의 물리 코어 수 - 1"로 자동 계산한다.
+_DEFAULT_N_ENVS = max(1, (os.cpu_count() or 8) - 1)
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--n_envs", type=int, default=8, help="동시에 돌릴 환경 개수")
+    parser.add_argument("--n_envs", type=int, default=_DEFAULT_N_ENVS,
+                         help="동시에 돌릴 환경 개수. 기본값은 '이 컴퓨터의 논리 코어 수 - 1'로 "
+                              f"자동 계산됨 (지금 이 컴퓨터 기준 {_DEFAULT_N_ENVS}). --multiprocess와 "
+                              "함께 쓸 때 코어 수보다 크게 잡으면 메인 프로세스와 워커들이 코어를 "
+                              "놓고 경쟁해 오히려 느려지니(실측 확인됨) 직접 늘리려면 주의할 것.")
     parser.add_argument("--n_steps", type=int, default=256, help="환경 하나당 한 이터레이션에 모을 스텝 수")
     parser.add_argument("--total_timesteps", type=int, default=2_000_000,
                          help="총 학습 스텝 수. 실제 이터레이션 횟수는 "
@@ -353,6 +375,17 @@ def main():
     # 먼저 끝나기를 기다린다(join) — 워커는 아직 살아있으니 곧 정상적으로
     # 끝난다.
     bg_thread = None
+    # 실제로 --multiprocess --pipeline 조합에서 터미널 Ctrl+C(전체 프로세스
+    # 그룹에 SIGINT가 동시에 전달됨)를 여러 번 반복 테스트하는 과정에서,
+    # 워커는 멀쩡히 살아있는데도(SIGINT 무시 확인됨) 그 순간 백그라운드
+    # 스레드의 파이프 write가 드물게 BrokenPipeError로 실패하는 현상이
+    # 관찰됐다 — macOS의 신호 전달과 멀티프로세싱 파이프가 얽히는 낮은
+    # 수준의 경합으로 보이며, 재현 조건이 좁고(무거운 학습 부하 중에만)
+    # 근본 원인을 완전히 제거하기 어렵다. 대신 "정리 중(shutting_down)에
+    # 이 스레드가 파이프 I/O 에러를 만나면, 그 롤아웃은 버리고 조용히
+    # 끝낸다"로 방어한다 — 어차피 곧 프로그램을 종료할 것이므로 그
+    # 데이터는 필요 없다.
+    shutdown_state = {"shutting_down": False}
 
     try:
         if args.pipeline:
@@ -369,7 +402,13 @@ def main():
                 result_box = {}
 
                 def bg_collect(o=obs_after):
-                    result_box["rollout"] = do_collect(o)
+                    try:
+                        result_box["rollout"] = do_collect(o)
+                    except (BrokenPipeError, EOFError, OSError):
+                        if not shutdown_state["shutting_down"]:
+                            raise
+                        # 정리 중에 파이프가 끊긴 것 — 이 롤아웃은 버리고
+                        # 조용히 끝낸다 (result_box에 아무것도 안 넣음).
 
                 bg_thread = threading.Thread(target=bg_collect)
                 bg_thread.start()
@@ -387,14 +426,36 @@ def main():
                 obs = rollout[-1]
                 process_rollout(it, rollout)
     except KeyboardInterrupt:
-        print("\nCtrl+C 감지 — 지금까지 학습한 모델을 저장하고 멈춥니다...")
+        # 급한 마음에 Ctrl+C를 여러 번 누르는 경우가 흔한데, 그때마다 매번
+        # 새 KeyboardInterrupt가 지금 실행 중인 코드(체크포인트 저장, 아래
+        # finally의 스레드/프로세스 정리 등) 중간을 끊어버리면 저장이
+        # 반쯤 끝나거나 정리가 덜 된 채로 지저분하게 죽을 수 있다. 그래서
+        # 첫 Ctrl+C를 받은 시점부터 "정리가 다 끝날 때까지" SIGINT 자체를
+        # 무시해서, 이후에 몇 번을 더 눌러도 지금 하던 정리를 끝까지
+        # 안전하게 마치도록 한다.
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        shutdown_state["shutting_down"] = True
+        print("\nCtrl+C 감지 — 지금까지 학습한 모델을 저장하고 멈춥니다... "
+              "(정리 중에는 Ctrl+C를 더 눌러도 무시되니 잠시만 기다려 주세요)")
         save_checkpoint(agent, args.ckpt_name)
         print(f"저장 완료: checkpoints/{args.ckpt_name}_actor.weights.h5 (uv run mjpython play.py 로 확인 가능)")
     else:
         print("training done.")
     finally:
-        if bg_thread is not None and bg_thread.is_alive():
-            bg_thread.join()
+        # 그냥 한 번 join()만 하면, 그 join() 도중에 Ctrl+C를 한 번 더
+        # 누르는 순간 join()이 중간에 끊겨버려서(=예외 발생) 여전히
+        # bg_thread가 살아있는 채로 아래 vec_env.close()가 실행돼버린다.
+        # 그러면 bg_thread는 자기 루프(do_collect의 n_steps 반복)를 계속
+        # 돌며 vec_env.step()을 또 부르는데, 그땐 이미 close()가 보낸
+        # "close" 명령을 받은 워커들이 죽어있어서 BrokenPipeError가 난다.
+        # 그래서 "진짜로 끝날 때까지" 반복해서 join하고, 그 사이 또
+        # Ctrl+C가 눌려도(급한 마음에 여러 번 누르는 경우가 흔함) 무시하지
+        # 않고 계속 기다린다.
+        while bg_thread is not None and bg_thread.is_alive():
+            try:
+                bg_thread.join(timeout=1.0)
+            except KeyboardInterrupt:
+                print("정리 중입니다 — 백그라운드로 수집 중이던 롤아웃이 끝날 때까지 잠시만 기다려 주세요...")
         if live_viewer_box[0] is not None:
             live_viewer_box[0].close()
         vec_env.close()

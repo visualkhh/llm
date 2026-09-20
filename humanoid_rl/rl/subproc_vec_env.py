@@ -32,6 +32,8 @@
 # ============================================================================
 
 import multiprocessing as mp
+import signal
+import threading
 
 import numpy as np
 
@@ -50,7 +52,17 @@ def _worker(remote, env_kwargs):
     반드시 모듈 최상위 함수여야 한다 — macOS/Windows의 멀티프로세싱 기본
     방식(spawn)은 자식 프로세스를 만들 때 이 함수를 다시 import해서 찾기
     때문에, 클래스 안의 메서드나 클로저로는 안 된다.
+
+    Ctrl+C(SIGINT)는 터미널이 "포그라운드 프로세스 그룹 전체"에 보내기
+    때문에, 이 자식 프로세스도 메인 프로세스와 동시에 SIGINT를 직접
+    받는다. 여기서 그걸 그대로 처리해버리면(=KeyboardInterrupt 발생) 메인
+    프로세스가 아직 "step" 결과를 기다리는 도중에 이 워커가 응답 없이
+    죽어버려서, 메인 쪽 파이프가 EOFError로 끊기고 뒤이어
+    vec_env.close()의 종료 명령 전송도 BrokenPipeError로 실패하게 된다.
+    그래서 워커는 SIGINT를 아예 무시하고, 메인 프로세스가 명시적으로
+    보내는 ("close", None) 명령을 받았을 때만 정상 종료한다.
     """
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
     env = BipedEnv(**env_kwargs)
     try:
         while True:
@@ -95,6 +107,15 @@ class SubprocVectorBipedEnv:
         self.action_space = probe_env.action_space
         probe_env.close()
 
+        # --pipeline 모드에서는 메인 스레드(close())와 백그라운드 스레드
+        # (step())가 동시에 이 파이프들을 건드릴 수 있다. Ctrl+C를 급하게
+        # 여러 번 눌러 정리 단계의 bg_thread.join()마저 중간에 끊기면, 두
+        # 스레드가 같은 파이프에 동시에 send()를 시도해서 "close" 명령을
+        # 받은 워커가 파이프를 닫는 순간 다른 스레드의 send()가
+        # BrokenPipeError로 죽는 경쟁 상태(race condition)가 생길 수
+        # 있다. step()/close()가 서로 겹쳐 실행되지 못하게 락으로 막는다.
+        self._lock = threading.Lock()
+
         ctx = mp.get_context("spawn")
         self.remotes, worker_remotes = zip(*[ctx.Pipe() for _ in range(self.n)])
         self.processes = [
@@ -132,26 +153,41 @@ class SubprocVectorBipedEnv:
         return {"per_worker": per_worker, "per_core": per_core}
 
     def reset(self, seed=None):
-        for i, remote in enumerate(self.remotes):
-            s = None if seed is None else seed + i
-            remote.send(("reset", (s, self.reset_options)))
-        obs_list = [remote.recv() for remote in self.remotes]
+        with self._lock:
+            for i, remote in enumerate(self.remotes):
+                s = None if seed is None else seed + i
+                remote.send(("reset", (s, self.reset_options)))
+            obs_list = [remote.recv() for remote in self.remotes]
         return np.stack(obs_list)
 
     def step(self, actions):
-        # 1) 모든 워커에게 먼저 명령을 다 보낸다 (여기서 각 워커가 동시에
-        #    자기 물리 시뮬레이션을 진행하기 시작함)
-        for remote, action in zip(self.remotes, actions):
-            remote.send(("step", action))
-        # 2) 그 다음에 결과를 순서대로 모은다 (이미 다 병렬로 계산되고 있으므로
-        #    여기서 기다리는 시간은 "가장 느린 워커 하나"의 시간과 비슷하다 —
-        #    N개를 순서대로 계산할 때보다 훨씬 빠르다)
-        results = [remote.recv() for remote in self.remotes]
+        with self._lock:
+            # 1) 모든 워커에게 먼저 명령을 다 보낸다 (여기서 각 워커가 동시에
+            #    자기 물리 시뮬레이션을 진행하기 시작함)
+            for remote, action in zip(self.remotes, actions):
+                remote.send(("step", action))
+            # 2) 그 다음에 결과를 순서대로 모은다 (이미 다 병렬로 계산되고 있으므로
+            #    여기서 기다리는 시간은 "가장 느린 워커 하나"의 시간과 비슷하다 —
+            #    N개를 순서대로 계산할 때보다 훨씬 빠르다)
+            results = [remote.recv() for remote in self.remotes]
         obs, rewards, dones, infos = zip(*results)
         return np.stack(obs), np.array(rewards, dtype=np.float32), np.array(dones, dtype=bool), list(infos)
 
     def close(self):
-        for remote in self.remotes:
-            remote.send(("close", None))
+        # 워커는 이제 SIGINT를 무시하므로 정상적인 상황에서는 항상 살아
+        # 있지만, 혹시라도 이미 죽어 있는 워커가 있어도(예: 물리 시뮬레이션
+        # 내부 에러로 먼저 죽은 경우) close() 자체가 통째로 실패해서 나머지
+        # 정리 작업(체크포인트 저장 등)까지 막지 않도록 방어적으로 처리한다.
+        # step()/reset()과 같은 락을 쓰므로, 백그라운드 스레드가 마침
+        # step() 도중이면 그게 끝날 때까지 여기서 기다렸다가 안전하게
+        # close 명령을 보낸다 (파이프 동시 접근으로 인한 BrokenPipeError 방지).
+        with self._lock:
+            for remote in self.remotes:
+                try:
+                    remote.send(("close", None))
+                except (BrokenPipeError, OSError):
+                    pass
         for p in self.processes:
             p.join(timeout=5)
+            if p.is_alive():
+                p.terminate()
