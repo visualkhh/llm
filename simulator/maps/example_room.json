@@ -1,0 +1,19 @@
+{
+  "name": "example_room",
+  "bounds": {"width": 10.0, "depth": 10.0},
+  "shapes": [
+    {"id": "wall_north", "type": "box", "pose": {"xyz": [0, 4.9, 0.75]}, "size": [10.0, 0.2, 1.5]},
+    {"id": "wall_south", "type": "box", "pose": {"xyz": [0, -4.9, 0.75]}, "size": [10.0, 0.2, 1.5]},
+    {"id": "wall_east",  "type": "box", "pose": {"xyz": [4.9, 0, 0.75]}, "size": [0.2, 10.0, 1.5]},
+    {"id": "wall_west",  "type": "box", "pose": {"xyz": [-4.9, 0, 0.75]}, "size": [0.2, 10.0, 1.5]},
+    {"id": "pillar_1", "type": "cylinder", "pose": {"xyz": [1.5, 1.5, 0.6]}, "radius": 0.25, "height": 1.2},
+    {"id": "pillar_2", "type": "cylinder", "pose": {"xyz": [-2.0, -1.0, 0.6]}, "radius": 0.25, "height": 1.2},
+    {"id": "table", "type": "box", "pose": {"xyz": [2.5, -2.0, 0.175]}, "size": [0.3, 0.3, 0.35]}
+  ],
+  "objects": [
+    {"id": "cube_1", "type": "box", "pose": {"xyz": [2.5, -2.0, 0.38]}, "size": [0.06, 0.06, 0.06], "color": [0.8, 0.2, 0.2], "graspable": true},
+    {"id": "cube_2", "type": "box", "pose": {"xyz": [2.7, -1.75, 0.38]}, "size": [0.06, 0.06, 0.06], "color": [0.2, 0.4, 0.85], "graspable": true},
+    {"id": "cube_3", "type": "box", "pose": {"xyz": [2.3, -1.75, 0.38]}, "size": [0.06, 0.06, 0.06], "color": [0.95, 0.8, 0.1], "graspable": true},
+    {"id": "ball_1", "type": "sphere", "pose": {"xyz": [-1.0, 2.0, 0.05]}, "radius": 0.05, "color": [0.6, 0.2, 0.8], "graspable": true}
+  ]
+}

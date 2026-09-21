@@ -1,0 +1,172 @@
+<?xml version="1.0"?>
+<!--
+  example_robot.urdf — 4륜 베이스 + 위쪽 플랫폼 + 매니퓰레이터(4관절+그리퍼)
+                        + 그리퍼 위 RGBD 카메라 + 몸통 3D 라이다
+
+  사용자가 나중에 직접 자기만의 URDF를 만들어 넣을 것이므로, 이 파일은
+  "이런 구조면 파서가 정상적으로 읽는다"는 걸 보여주는 예시/테스트용이다
+  (urdf/parser.py가 이 파일을 기준으로 검증됨).
+
+  좌표계 관례(ROS 표준과 동일): x=전방, y=왼쪽, z=위. 각 링크 이름은
+  simulator/run.py에서 로봇을 조립할 때 그대로 참조한다.
+-->
+<robot name="example_robot">
+
+  <!-- ===================== 몸체(베이스) ===================== -->
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.5 0.35 0.15"/></geometry>
+      <material name="body_gray"><color rgba="0.25 0.25 0.28 1.0"/></material>
+    </visual>
+  </link>
+
+  <!-- ===================== 바퀴 4개 (각각 독립 관절) ===================== -->
+  <link name="front_left_wheel_link">
+    <visual><origin xyz="0 0 0" rpy="-1.5708 0 0"/>
+      <geometry><cylinder radius="0.08" length="0.04"/></geometry>
+      <material name="wheel_black"><color rgba="0.05 0.05 0.05 1.0"/></material></visual>
+  </link>
+  <joint name="front_left_wheel_joint" type="continuous">
+    <parent link="base_link"/><child link="front_left_wheel_link"/>
+    <origin xyz="0.18 0.19 -0.06" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+
+  <link name="front_right_wheel_link">
+    <visual><origin xyz="0 0 0" rpy="-1.5708 0 0"/>
+      <geometry><cylinder radius="0.08" length="0.04"/></geometry>
+      <material name="wheel_black"><color rgba="0.05 0.05 0.05 1.0"/></material></visual>
+  </link>
+  <joint name="front_right_wheel_joint" type="continuous">
+    <parent link="base_link"/><child link="front_right_wheel_link"/>
+    <origin xyz="0.18 -0.19 -0.06" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+
+  <link name="rear_left_wheel_link">
+    <visual><origin xyz="0 0 0" rpy="-1.5708 0 0"/>
+      <geometry><cylinder radius="0.08" length="0.04"/></geometry>
+      <material name="wheel_black"><color rgba="0.05 0.05 0.05 1.0"/></material></visual>
+  </link>
+  <joint name="rear_left_wheel_joint" type="continuous">
+    <parent link="base_link"/><child link="rear_left_wheel_link"/>
+    <origin xyz="-0.18 0.19 -0.06" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+
+  <link name="rear_right_wheel_link">
+    <visual><origin xyz="0 0 0" rpy="-1.5708 0 0"/>
+      <geometry><cylinder radius="0.08" length="0.04"/></geometry>
+      <material name="wheel_black"><color rgba="0.05 0.05 0.05 1.0"/></material></visual>
+  </link>
+  <joint name="rear_right_wheel_joint" type="continuous">
+    <parent link="base_link"/><child link="rear_right_wheel_link"/>
+    <origin xyz="-0.18 -0.19 -0.06" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+
+  <!-- ===================== 3D 라이다 (몸통 장착) ===================== -->
+  <link name="lidar_link">
+    <visual><geometry><cylinder radius="0.04" length="0.06"/></geometry>
+      <material name="lidar_dark"><color rgba="0.1 0.1 0.1 1.0"/></material></visual>
+  </link>
+  <joint name="lidar_joint" type="fixed">
+    <parent link="base_link"/><child link="lidar_link"/>
+    <origin xyz="-0.15 0 0.12" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ===================== 위쪽 플랫폼 ===================== -->
+  <link name="platform_link">
+    <visual><geometry><box size="0.3 0.3 0.02"/></geometry>
+      <material name="platform_gray"><color rgba="0.4 0.4 0.42 1.0"/></material></visual>
+  </link>
+  <joint name="platform_joint" type="fixed">
+    <parent link="base_link"/><child link="platform_link"/>
+    <origin xyz="0.05 0 0.085" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ===================== 매니퓰레이터(4 관절) ===================== -->
+  <link name="arm_pivot_link">
+    <visual><geometry><cylinder radius="0.04" length="0.06"/></geometry>
+      <material name="arm_orange"><color rgba="0.85 0.45 0.1 1.0"/></material></visual>
+  </link>
+  <joint name="arm_base_yaw_joint" type="revolute">
+    <parent link="platform_link"/><child link="arm_pivot_link"/>
+    <origin xyz="0 0 0.04" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.14" upper="3.14" effort="10" velocity="1.5"/>
+  </joint>
+
+  <link name="upper_arm_link">
+    <visual><origin xyz="0.25 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.5 0.06 0.06"/></geometry>
+      <material name="arm_orange"><color rgba="0.85 0.45 0.1 1.0"/></material></visual>
+  </link>
+  <joint name="shoulder_pitch_joint" type="revolute">
+    <parent link="arm_pivot_link"/><child link="upper_arm_link"/>
+    <origin xyz="0 0 0.03" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-2.0" upper="2.0" effort="10" velocity="1.5"/>
+  </joint>
+
+  <link name="forearm_link">
+    <visual><origin xyz="0.225 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.45 0.05 0.05"/></geometry>
+      <material name="arm_orange_light"><color rgba="0.9 0.55 0.2 1.0"/></material></visual>
+  </link>
+  <joint name="elbow_pitch_joint" type="revolute">
+    <parent link="upper_arm_link"/><child link="forearm_link"/>
+    <origin xyz="0.5 0 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <!-- 사람 팔꿈치처럼 한쪽으로만 굽도록 0~2.6으로 제한 (기존엔 -2.6~2.6로
+         양쪽 다 열려있어서, IK가 수학적으로는 맞지만 반대로 꺾인 것처럼
+         보이는 부자연스러운 해를 고를 수 있었다). -->
+    <limit lower="0.0" upper="2.6" effort="8" velocity="1.8"/>
+  </joint>
+
+  <link name="gripper_base_link">
+    <visual><geometry><box size="0.06 0.08 0.04"/></geometry>
+      <material name="gripper_dark"><color rgba="0.2 0.2 0.22 1.0"/></material></visual>
+  </link>
+  <joint name="wrist_pitch_joint" type="revolute">
+    <parent link="forearm_link"/><child link="gripper_base_link"/>
+    <origin xyz="0.32 0 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1.8" upper="1.8" effort="6" velocity="2.0"/>
+  </joint>
+
+  <!-- 그리퍼 손가락 2개 (평행 그리퍼) -->
+  <link name="left_finger_link">
+    <visual><geometry><box size="0.04 0.015 0.03"/></geometry>
+      <material name="finger_gray"><color rgba="0.55 0.55 0.58 1.0"/></material></visual>
+  </link>
+  <joint name="left_finger_joint" type="prismatic">
+    <parent link="gripper_base_link"/><child link="left_finger_link"/>
+    <origin xyz="0.06 0.025 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0.0" upper="0.04" effort="5" velocity="0.5"/>
+  </joint>
+
+  <link name="right_finger_link">
+    <visual><geometry><box size="0.04 0.015 0.03"/></geometry>
+      <material name="finger_gray"><color rgba="0.55 0.55 0.58 1.0"/></material></visual>
+  </link>
+  <joint name="right_finger_joint" type="prismatic">
+    <parent link="gripper_base_link"/><child link="right_finger_link"/>
+    <origin xyz="0.06 -0.025 0" rpy="0 0 0"/>
+    <axis xyz="0 -1 0"/>
+    <limit lower="0.0" upper="0.04" effort="5" velocity="0.5"/>
+  </joint>
+
+  <!-- ===================== 그리퍼 위 RGBD 카메라 ===================== -->
+  <link name="camera_link">
+    <visual><geometry><box size="0.03 0.06 0.025"/></geometry>
+      <material name="camera_blue"><color rgba="0.15 0.35 0.75 1.0"/></material></visual>
+  </link>
+  <joint name="camera_joint" type="fixed">
+    <parent link="gripper_base_link"/><child link="camera_link"/>
+    <origin xyz="0.05 0 0.025" rpy="0 0 0"/>
+  </joint>
+
+</robot>
