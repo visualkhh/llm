@@ -9,8 +9,11 @@ dependencies = [
     "matplotlib>=3.10.9",
     "mujoco>=3.13.0",
     "numpy>=2.2.6",
+    "open3d>=0.20.0",
     "opencv-python>=5.0.0.93",
     "psutil>=7.2.2",
     "tensorflow>=2.21.0",
     "torch>=2.14.0",
+    "transformers>=5.17.0",
+    "ultralytics>=8.4.123",
 ]

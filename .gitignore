@@ -9,3 +9,7 @@ chat/data/*.bin
 chat/data/*.pkl
 
 humanoid_rl/checkpoints/
+
+3d/*.pt
+3d/objects.json
+3d/annotated_2d.png
