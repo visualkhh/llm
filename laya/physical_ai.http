@@ -1,0 +1,119 @@
+### 피지컬 AI(로봇) 시나리오용 laya 질문 모음
+### laya는 이미지를 못 받는다(텍스트/좌표만 읽는 System 1 결정 엔진) — 그래서
+### "지금 어디 있고 어디로 가야 하는지"를 current_xyz/target_xyz처럼 명확한
+### 필드로 다 적어줘야 한다. 또한 좌표를 직접 비교/계산하지도 못하므로
+### (1.3m > 0.9m 같은 수치 비교를 실제로 틀리는 걸 확인함), "밖에 있음/충돌
+### 위험 큼"처럼 수치 비교 결과 자체도 상태에 같이 적어준다 — 계산은
+### 우리 코드가 미리 하고, laya에는 이미 판단된 라벨 + 근거 숫자를 같이 준다.
+###
+### instructions/criteria를 전부 영어로 바꿈: state는 JSON(영어 키)이라
+### 원래도 english 체크포인트로 라우팅됐지만, instructions/criteria가
+### 한국어로 섞여 있으면 "영어 밖에서 붕괴한다"는 그 체크포인트가 그 부분을
+### 잘못 읽을 수 있어서(실제로 target_object가 unreachable=false인
+### cube_2를 잘못 고르는 등 부정확한 결과를 봤음) 전부 영어로 통일했다.
+
+@host = http://localhost:8000
+
+### 1) 인식(perception): 여러 타겟 후보 중 뭘 먼저 집어야 하는지 (choice)
+POST {{host}}/v1/systemone
+Content-Type: application/json
+
+{
+  "state": {
+    "current_gripper_xyz": [0.0, 0.0, 0.30],
+    "target_candidates": [
+      {"id": "cube_1", "target_xyz": [0.32, 0.05, 0.18], "color": "red",
+       "distance_from_current_m": 0.34, "reachable": true},
+      {"id": "cube_2", "target_xyz": [-0.28, 0.20, 0.85], "color": "blue",
+       "distance_from_current_m": 0.92, "reachable": false},
+      {"id": "ball_1", "target_xyz": [0.60, -0.15, 0.20], "color": "purple",
+       "distance_from_current_m": 0.66, "reachable": true}
+    ]
+  },
+  "questions": {
+    "target_object": {
+      "type": "choice",
+      "instructions": "Which target is closest to current_gripper_xyz and has reachable=true?",
+      "criteria": {
+        "cube_1": "distance_from_current_m 0.34, closest, reachable=true",
+        "cube_2": "distance_from_current_m 0.92, farthest, reachable=false (unreachable)",
+        "ball_1": "distance_from_current_m 0.66, reachable=true but farther than cube_1"
+      }
+    }
+  }
+}
+
+### 2) 인지(recognition): 현재→목표 이동 경로 위 장애물 유무 (noul)
+POST {{host}}/v1/systemone
+Content-Type: application/json
+
+{
+  "state": {
+    "current_xyz": [0.0, 0.0, 0.30],
+    "target_xyz": [0.32, 0.05, 0.18],
+    "obstacles_on_path": [
+      {"id": "cube_3", "xyz": [0.15, 0.02, 0.20], "distance_to_path_m": 0.03, "blocking": true},
+      {"id": "lamp_1", "xyz": [-0.5, 0.4, 0.9], "distance_to_path_m": 0.9, "blocking": false}
+    ]
+  },
+  "questions": {
+    "path_blocked": {
+      "type": "noul",
+      "instructions": "Is there any obstacle with blocking=true on the path from current_xyz to target_xyz?",
+      "criteria": {
+        "false": "all obstacles have blocking=false (clear of the path)",
+        "true": "at least one obstacle has blocking=true (collision risk)"
+      }
+    }
+  }
+}
+
+### 3) 파지 난이도 평가 (score, 3단계) — 현재 위치 대비 목표 위치 기준
+POST {{host}}/v1/systemone
+Content-Type: application/json
+
+{
+  "state": {
+    "current_gripper_xyz": [0.0, 0.0, 0.30],
+    "target_xyz": [0.60, -0.15, 0.20],
+    "target_shape": "sphere",
+    "target_size_m": 0.06,
+    "arm_reach_limit_m": 0.75,
+    "distance_from_pivot_to_target_m": 0.66,
+    "distance_ratio_to_limit": 0.88
+  },
+  "questions": {
+    "grasp_difficulty": {
+      "type": "score",
+      "instructions": "distance_ratio_to_limit close to 1 means harder to reach. How difficult is grasping this target?",
+      "criteria": ["easy", "medium", "hard"]
+    }
+  }
+}
+
+### 4) 안전(safety) 인지: 작업공간 근처 사람 감지 (noul)
+POST {{host}}/v1/systemone
+Content-Type: application/json
+
+{
+  "state": {
+    "current_robot_xyz": [0.0, 0.0, 0.0],
+    "robot_workspace_radius_m": 0.9,
+    "detections": [
+      {"class": "person", "target_xyz": [0.4, 1.2, 0.0],
+       "distance_from_current_robot_m": 1.3, "inside_workspace": false},
+      {"class": "chair", "target_xyz": [-1.0, 0.5, 0.0],
+       "distance_from_current_robot_m": 1.1, "inside_workspace": false}
+    ]
+  },
+  "questions": {
+    "human_in_workspace": {
+      "type": "noul",
+      "instructions": "Is there any detection with class=person and inside_workspace=true?",
+      "criteria": {
+        "false": "every person detection has inside_workspace=false (outside workspace)",
+        "true": "at least one person detection has inside_workspace=true (inside workspace)"
+      }
+    }
+  }
+}

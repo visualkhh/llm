@@ -1,0 +1,78 @@
+### laya-serve 테스트용 IntelliJ/PyCharm HTTP Client 요청 모음
+### 사용법: 먼저 `uv run python3 laya/run.py`로 서버를 띄운 뒤,
+###        각 요청 위의 ▶(Run) 아이콘을 눌러 실행한다.
+###
+### 영어로 물어봐야 하나? -> 기본은 영어를 권장한다. laya 공식 벤치마크
+### (router.py 소스 주석)에 "영어 체크포인트는 영어 밖에서는 완만하게
+### 저하되는 게 아니라 붕괴한다"고 직접 적혀있고, 한국어처럼 비영어
+### 텍스트는 자동으로 더 작고 약한 multilingual 체크포인트로 라우팅된다.
+### 아래 churn_risk 질문은 한국어/영어 버전을 나란히 넣어서 직접
+### 비교할 수 있게 해뒀다 (실제 테스트에서 한국어는 0.157/틀림,
+### 영어는 더 정확하게 나오는지 직접 실행해서 확인해볼 것).
+
+@host = http://localhost:8000
+
+### 헬스 체크
+GET {{host}}/health
+
+### 분류(choice) + 등급(score) 질문 (영어 — 권장 기본형)
+POST {{host}}/v1/systemone
+Content-Type: application/json
+
+{
+  "state": "I was charged twice in March. Please refund the duplicate charge today.",
+  "questions": {
+    "department": {
+      "type": "choice",
+      "instructions": "Which department should handle this?",
+      "criteria": {
+        "billing": "invoices, payments, refunds",
+        "technical": "bugs, outages, system errors",
+        "other": "everything else"
+      }
+    },
+    "urgency": {
+      "type": "score",
+      "instructions": "How urgent is this?",
+      "criteria": ["not urgent", "soon", "critical"]
+    }
+  }
+}
+
+### 예/아니오 확률(noul) — 영어 버전 (권장 기본형)
+POST {{host}}/v1/systemone
+Content-Type: application/json
+
+{
+  "state": "If this charge keeps happening, I will cancel my subscription.",
+  "questions": {
+    "churn_risk": {
+      "type": "noul",
+      "instructions": "Is the user threatening to cancel?",
+      "criteria": {
+        "false": "no threat to cancel",
+        "true": "threatens to cancel or leave"
+      }
+    }
+  }
+}
+
+### 예/아니오 확률(noul) — 위와 같은 내용의 한국어 버전 (비교용)
+### 실행해서 영어 버전(위)과 noul 값을 비교해볼 것 — 한국어는
+### multilingual 체크포인트로 라우팅되어 정확도가 떨어질 수 있다.
+POST {{host}}/v1/systemone
+Content-Type: application/json
+
+{
+  "state": "이 요금 계속 이렇게 나가면 서비스 해지할 거예요.",
+  "questions": {
+    "churn_risk": {
+      "type": "noul",
+      "instructions": "사용자가 해지를 위협하고 있나요?",
+      "criteria": {
+        "false": "no threat to cancel",
+        "true": "threatens to cancel or leave"
+      }
+    }
+  }
+}
